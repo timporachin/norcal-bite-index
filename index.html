@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05171c">
+  <meta name="description" content="Live bite score for Northern California salmon rivers, the coast, the Delta and the lakes — built from real gauge, tide, swell and weather data.">
+  <title>NorCal Bite Index</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="fish.css">
+  <script defer src="js/fish-astro.js"></script>
+  <script defer src="js/fish-species.js"></script>
+  <script defer src="js/fish-spots.js"></script>
+  <script defer src="js/fish-model.js"></script>
+  <script defer src="js/fish-data.js"></script>
+  <script defer src="js/fish-ui.js"></script>
+</head>
+<body>
+
+<header class="console-head">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 44 44" aria-hidden="true">
+      <circle cx="22" cy="22" r="20" fill="none" stroke="var(--shelf)" stroke-width="1"></circle>
+      <circle cx="22" cy="22" r="13" fill="none" stroke="var(--shelf)" stroke-width="1"></circle>
+      <circle cx="22" cy="22" r="6" fill="none" stroke="var(--tide)" stroke-width="1.4"></circle>
+      <path d="M8 26c5-6 9-6 14 0s9 6 14 0" fill="none" stroke="var(--salmon)" stroke-width="2" stroke-linecap="round"></path>
+      <circle cx="22" cy="22" r="2.4" fill="var(--salmon)"></circle>
+    </svg>
+    <div class="brand-text">
+      <p class="eyebrow">Northern California · salmon &amp; coast</p>
+      <h1>Bite Index</h1>
+    </div>
+  </div>
+  <div class="head-side">
+    <p class="clock" id="clock">—</p>
+  </div>
+</header>
+
+<section class="spotbar" aria-label="Location and target">
+  <div class="spot-picker">
+    <button type="button" id="spotToggle" class="spot-current" aria-expanded="false" aria-controls="spotPanel">
+      <span class="spot-name" id="spotName">Loading…</span>
+      <span class="spot-meta" id="spotMeta">—</span>
+    </button>
+    <div class="spot-panel" id="spotPanel" hidden>
+      <input type="search" id="spotSearch" placeholder="Search rivers, bays, lakes, beaches" autocomplete="off" aria-label="Search spots">
+      <ul class="spot-list" id="spotList"></ul>
+    </div>
+  </div>
+
+  <button type="button" id="gpsBtn" class="gps-btn">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"></circle><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"></circle><path d="M8 0v2.2M8 13.8V16M0 8h2.2M13.8 8H16" stroke="currentColor" stroke-width="1.3"></path></svg>
+    Nearest to me
+  </button>
+
+  <div class="species-picker">
+    <label for="speciesSelect">Target</label>
+    <select id="speciesSelect"></select>
+  </div>
+
+  <button type="button" id="unitToggle" class="unit-toggle" aria-label="Switch units">°F · mph</button>
+
+  <ul class="status-leds" id="statusLeds" aria-label="Data sources"></ul>
+</section>
+
+<main>
+
+  <div class="hero-grid">
+    <article class="panel gauge-card">
+      <div class="panel-head">
+        <h2>Bite score</h2>
+        <span class="panel-note" id="gaugeWhen">right now</span>
+      </div>
+
+      <div class="gauge-wrap">
+        <svg class="gauge" id="gauge" viewBox="0 0 340 250" role="img" aria-labelledby="gaugeTitle">
+          <title id="gaugeTitle">Bite score dial</title>
+        </svg>
+        <div class="gauge-center">
+          <p class="score" id="scoreValue">--</p>
+          <p class="verdict" id="verdict">reading water</p>
+        </div>
+      </div>
+
+      <p class="read-line" id="readLine">Pulling gauge, tide and weather data…</p>
+
+      <div class="confidence">
+        <div class="conf-bar"><span id="confFill"></span></div>
+        <p class="conf-text" id="confText">—</p>
+      </div>
+
+      <div class="windows" id="windows" aria-label="Best windows"></div>
+    </article>
+
+    <article class="panel conditions-card">
+      <div class="panel-head">
+        <h2>On the water</h2>
+        <span class="badge" id="waterBadge">—</span>
+      </div>
+
+      <div class="temp-scale" id="tempScale" aria-hidden="true"></div>
+      <p class="temp-caption" id="tempCaption">—</p>
+
+      <dl class="readout" id="readout"></dl>
+
+      <div class="mini-row">
+        <figure class="mini"><svg id="moonDial" viewBox="0 0 72 72" aria-hidden="true"></svg><figcaption id="moonCap">—</figcaption></figure>
+        <figure class="mini"><svg id="windDial" viewBox="0 0 72 72" aria-hidden="true"></svg><figcaption id="windCap">—</figcaption></figure>
+        <figure class="mini"><svg id="pressSpark" viewBox="0 0 96 72" aria-hidden="true"></svg><figcaption id="pressCap">—</figcaption></figure>
+      </div>
+
+      <div class="safety" id="safety" hidden></div>
+    </article>
+  </div>
+
+  <section class="panel timeline-card">
+    <div class="panel-head">
+      <h2>Next 72 hours</h2>
+      <button type="button" class="panel-note now-btn" id="nowBtn">Drag the chart to read any hour</button>
+    </div>
+    <div class="chart-scroll">
+      <svg class="timeline" id="timeline" viewBox="0 0 980 316" role="img" aria-labelledby="timelineTitle">
+        <title id="timelineTitle">Hourly bite score and tide height for the next 72 hours</title>
+      </svg>
+    </div>
+    <p class="chart-foot" id="timelineFoot">—</p>
+  </section>
+
+  <section class="panel run-card" id="runCard" hidden>
+    <div class="panel-head">
+      <h2 id="runHeading">Run &amp; river</h2>
+      <span class="panel-note" id="runNote">—</span>
+    </div>
+    <div class="run-grid">
+      <figure class="run-fig">
+        <svg id="runCurve" viewBox="0 0 420 150" role="img" aria-labelledby="runCurveTitle">
+          <title id="runCurveTitle">Typical run timing through the year</title>
+        </svg>
+        <figcaption>When the fish are typically in this system</figcaption>
+      </figure>
+      <figure class="run-fig">
+        <svg id="hydrograph" viewBox="0 0 420 150" role="img" aria-labelledby="hydroTitle">
+          <title id="hydroTitle">River flow over the last ten days</title>
+        </svg>
+        <figcaption id="hydroCap">Flow, last 10 days</figcaption>
+      </figure>
+    </div>
+    <p class="run-read" id="runRead">—</p>
+  </section>
+
+  <section class="factors-section">
+    <div class="section-head">
+      <h2>What is driving the score</h2>
+      <p>Every factor below is measured, weighted and shown. Tap one to read why it matters.</p>
+    </div>
+    <ul class="factor-list" id="factorList"></ul>
+  </section>
+
+  <section class="panel model-card">
+    <div class="panel-head"><h2>How this score is built</h2><span class="panel-note" id="profileNote">—</span></div>
+
+    <p class="model-lede">
+      The score is a weighted index over conditions that are actually measured at or near your spot.
+      Each factor is scored 0–1 from a published fish-behaviour relationship or a long-standing
+      Northern California angling rule, then combined by the weights below. Factors with no data are
+      dropped and the rest reweighted, which is what the confidence figure reports.
+    </p>
+
+    <div class="weights" id="weights"></div>
+
+    <div class="model-notes">
+      <div>
+        <h3>What it does not know</h3>
+        <p>
+          Whether anyone is catching. It has no creel counts, no hatchery returns, no report from
+          the guy who launched at dawn. A river can read 90 and be empty, or read 40 on the day
+          somebody lands the fish of the season. Treat it as a way to compare hours and days, not
+          as a promise.
+        </p>
+      </div>
+      <div>
+        <h3>Regulations are not in here</h3>
+        <p>
+          Seasons, closures, gear rules and limits change every year, and a stale rule shown as
+          fact is worse than none. Run timing below describes when fish are usually present, not
+          when it is legal to fish for them.
+          <a href="https://wildlife.ca.gov/Fishing/Inland/Regulations" target="_blank" rel="noopener">Check current CDFW regulations →</a>
+        </p>
+      </div>
+      <div>
+        <h3>Where the numbers come from</h3>
+        <ul class="source-list">
+          <li><a href="https://waterdata.usgs.gov/nwis/rt" target="_blank" rel="noopener">USGS NWIS</a> — river temperature, flow, stage, turbidity</li>
+          <li><a href="https://tidesandcurrents.noaa.gov/" target="_blank" rel="noopener">NOAA CO-OPS</a> — tide predictions and station water temperature</li>
+          <li><a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> — pressure, wind, cloud, rain, sea surface temperature, swell</li>
+          <li>Sun and moon geometry are computed in the page, so solunar and light still work offline.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="console-foot">
+  <p>Bite Index reads live public data and scores it in your browser. Nothing is uploaded; your spot and units are remembered on this device only.</p>
+  <p class="foot-safety">Check the weather and the bar before you go. No score is worth a bad crossing.</p>
+</footer>
+
+</body>
+</html>

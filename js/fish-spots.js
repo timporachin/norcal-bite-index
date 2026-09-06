@@ -13,6 +13,14 @@
      ocean        open coast
      surf         beach fishing
      lake         reservoirs and natural lakes
+
+   A spot may also carry `cdec`, naming the California Data Exchange Center
+   stations that supply its temperature and flow. CDEC serves no CORS headers,
+   so those readings are refreshed into data/cdec.js by a scheduled job rather
+   than fetched from the browser. The Feather spots carry no `gauges` at all:
+   there is no USGS gauge on that river, and borrowing one from the Sacramento
+   or the Yuba is worse than reporting nothing — so if the refresher stops, the
+   flow factor drops out and confidence falls, which is visible and honest.
 */
 (function (root) {
   'use strict';
@@ -133,20 +141,28 @@
       blurb: 'Lower river bank water. Shad in May and June, kings from late September.'
     },
     {
+      id: 'feather-outlet', name: 'Feather River — Thermalito Outlet', region: 'Sacramento Valley',
+      lat: 39.4664, lon: -121.6236, cls: 'river', system: 'feather',
+      cdec: { temp: 'GRL', flow: 'GRL' },
+      gaugeNote: 'Temperature and flow from the CDEC station at Gridley — the nearest live sensor in the Feather.',
+      species: ['chinook-fall', 'steelhead-winter', 'shad'],
+      blurb: 'The low-flow section below the hatchery and the afterbay outlet. Cold releases hold fish here weeks before the rest of the river turns on.'
+    },
+    {
       id: 'feather-gridley', name: 'Feather River — Gridley', region: 'Sacramento Valley',
       lat: 39.3638, lon: -121.6919, cls: 'river', system: 'feather',
-      gauges: ['11425500'],
-      gaugeNote: 'The Feather is metered by CDEC, not the USGS live feed, so readings come from the nearest live gauge downstream.',
+      cdec: { temp: 'GRL', flow: 'GRL' },
+      gaugeNote: 'Live CDEC readings from the Gridley station, in this reach.',
       species: ['chinook-fall', 'steelhead-winter', 'shad', 'striper'],
-      blurb: 'The low-flow section below the hatchery — September and October are the peak.'
+      blurb: 'Mid-river boat and bank water, and the reach the Gridley gauge reads directly.'
     },
     {
       id: 'feather-yuba-city', name: 'Feather River — Yuba City', region: 'Sacramento Valley',
       lat: 39.1338, lon: -121.6069, cls: 'river', system: 'feather',
-      gauges: ['11425500', '11421000'],
-      gaugeNote: 'The Feather is metered by CDEC, not the USGS live feed, so readings come from the nearest live gauges.',
+      cdec: { temp: 'GRL', flow: 'FSB' },
+      gaugeNote: 'Flow from CDEC at Shanghai Bend; temperature from Gridley, the nearest Feather sensor.',
       species: ['chinook-fall', 'steelhead-winter', 'shad', 'striper'],
-      blurb: 'Boat water through town, with the Yuba pouring in just upstream.'
+      blurb: 'The high-flow channel through town, with the Yuba pouring in just upstream.'
     },
     {
       id: 'yuba-marysville', name: 'Yuba River — Marysville', region: 'Sacramento Valley',

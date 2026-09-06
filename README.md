@@ -11,9 +11,23 @@ Everything runs in your browser. There is no server, no account and no API key, 
 | [USGS NWIS](https://waterdata.usgs.gov/nwis/rt) | River temperature, discharge, stage and turbidity from the actual gauge nearest your spot |
 | [NOAA CO-OPS](https://tidesandcurrents.noaa.gov/) | Tide predictions, and station water temperature where the sensor exists |
 | [Open-Meteo](https://open-meteo.com/) | Barometric pressure, wind and gusts, cloud, rain, sea surface temperature and swell |
+| [CDEC](https://cdec.water.ca.gov/) | Feather River temperature and flow — see below |
 | Computed in the page | Sun and moon position, sunrise and sunset, moon phase, solunar periods — so light and solunar still work with no network |
 
-**66 spots** are built in, each wired to the real gauge and tide station that covers it — from Freeport, Verona and Sailor Bar to Klamath Glen, Hoopa, Scotia, the Farallones, Clear Lake and Ocean Beach. Tap **Nearest to me** or search the list. **24 species** carry temperature bands and per-river run curves.
+**67 spots** are built in, each wired to the real gauge and tide station that covers it — from Freeport, Verona and Sailor Bar to Klamath Glen, Hoopa, Scotia, the Farallones, Clear Lake and Ocean Beach. Tap **Nearest to me** or search the list. **24 species** carry temperature bands and per-river run curves.
+
+## The Feather River and CDEC
+
+The Feather is metered by the California Data Exchange Center, not the USGS live feed, and **CDEC sends no CORS headers** — so a static page cannot read it from the browser.
+
+It used to borrow readings from Sacramento @ Verona, 25 river miles downstream on a different river, and that was badly wrong where it mattered: Verona read **72 °F** on a day the Feather at Gridley was **59 °F**. Water temperature is the heaviest factor in the salmon profile after run timing, and 72 °F is past the line where Chinook migration stalls. The app was calling the river too warm to bother with while it was in perfect shape.
+
+So `.github/workflows/refresh-cdec.yml` runs `scripts/fetch-cdec.mjs` every hour, fetches CDEC where CORS does not apply, and commits `data/cdec.js`. The page loads that from its own origin. Gridley supplies temperature for the whole river; flow comes from the station nearest each stretch.
+
+Two things to know:
+
+- **GitHub disables scheduled workflows on a public repo after 60 days with no activity.** If the Feather data goes stale the app shows an amber CDEC light rather than pretending the reading is current — re-run the workflow from the Actions tab to wake it up.
+- **The Feather spots carry no USGS fallback gauge on purpose.** There is no USGS gauge on that river, and a flow number borrowed from the Sacramento or the Yuba is worse than none. If the refresher stops, flow drops out of the score and confidence falls, which is visible and honest.
 
 ## How the score works
 
@@ -60,11 +74,13 @@ The site then serves at `https://<your-username>.github.io/norcal-bite-index/`. 
 | `fish.css` | The whole design system — a single dark instrument theme |
 | `js/fish-astro.js` | Solar and lunar geometry: sun altitude, sunrise/sunset, moon phase, solunar periods |
 | `js/fish-species.js` | 24 species with temperature bands and run-timing curves |
-| `js/fish-spots.js` | The 66-spot registry, with gauge and tide station IDs |
+| `js/fish-spots.js` | The 67-spot registry, with gauge, tide and CDEC station IDs |
 | `js/fish-model.js` | The scoring engine — pure functions, no DOM and no network, so it can be exercised from node |
 | `js/fish-data.js` | Live data layer with timeouts, caching and last-good fallback |
 | `js/fish-ui.js` | Rendering and interaction |
+| `data/cdec.js` | Generated hourly by the workflow — CDEC readings for the Feather. Safe to delete; the app just loses the Feather's live numbers |
+| `scripts/fetch-cdec.mjs` | The refresher. Refuses to write if CDEC is down or the data looks wrong |
 
 ## Credits
 
-Data from the U.S. Geological Survey, NOAA Tides & Currents, and Open-Meteo. Run timing follows the standard CDFW and PFMC windows and long-established Northern California angling seasons.
+Data from the U.S. Geological Survey, NOAA Tides & Currents, Open-Meteo, and the California Data Exchange Center. Run timing follows the standard CDFW and PFMC windows and long-established Northern California angling seasons.

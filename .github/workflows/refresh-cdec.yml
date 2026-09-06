@@ -1,0 +1,51 @@
+# Refresh the CDEC readings the Feather River spots depend on.
+#
+# CDEC serves no CORS headers, so the page cannot call it directly. This job
+# fetches it where CORS does not apply and commits the result, which the page
+# then loads from its own origin.
+#
+# Note: GitHub disables scheduled workflows on a public repository after 60 days
+# with no activity. If the Feather data goes stale, check here first — the app
+# shows an amber source light rather than pretending the reading is current.
+
+name: Refresh CDEC data
+
+on:
+  schedule:
+    # Hourly, off the top of the hour: GitHub delays the :00 stampede.
+    - cron: '20 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-cdec
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Exits non-zero without writing if CDEC is down or the data looks wrong,
+      # so a bad fetch never overwrites a good file.
+      - name: Fetch CDEC
+        run: node scripts/fetch-cdec.mjs
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/cdec.js; then
+            echo "No change in data/cdec.js — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/cdec.js
+          git commit -m "Refresh CDEC readings"
+          git push

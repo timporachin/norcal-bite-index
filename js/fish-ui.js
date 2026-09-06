@@ -1223,8 +1223,14 @@
     });
 
     var badge = $('waterBadge');
-    badge.textContent = env.water.label + (env.water.distanceMi !== null && env.water.distanceMi !== undefined
-      ? ' · ' + env.water.distanceMi.toFixed(1) + ' mi' : '');
+    var badgeQualifier = '';
+    if (env.water.distanceMi !== null && env.water.distanceMi !== undefined) {
+      badgeQualifier = ' · ' + env.water.distanceMi.toFixed(1) + ' mi';
+    } else if (env.water.source === 'cdec' && env.water.siteName) {
+      // No coordinates come back with a CDEC station, so name it instead.
+      badgeQualifier = ' · ' + env.water.siteName.replace(/^.*\sat\s/, '');
+    }
+    badge.textContent = env.water.label + badgeQualifier;
     badge.className = 'badge' + (env.water.source === 'modeled' ? ' modeled' : '');
     badge.title = env.water.siteName || '';
 

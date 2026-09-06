@@ -9,6 +9,9 @@
      USGS NWIS             river temperature, discharge, stage, turbidity
      NOAA CO-OPS           tide predictions, and water temperature where the
                            station carries a sensor
+     CDEC (via data/cdec.js)  Feather River temperature and flow. CDEC sends no
+                           CORS headers, so a scheduled job commits its readings
+                           into the repo and the page loads them same-origin.
 
    Everything is cached in localStorage with a per-source TTL. When a source
    fails we fall back to the last good copy and mark it stale; when there is no
@@ -229,6 +232,35 @@
     });
   }
 
+  /* CDEC readings arrive as a global from data/cdec.js rather than a fetch,
+     because CDEC serves no CORS headers and a static page cannot call it. The
+     file is refreshed by a scheduled job; if it is absent, every spot simply
+     behaves as it did before CDEC existed. */
+  var CDEC_STALE_MS = 6 * 3600000;
+
+  function cdecSeries(spot, key) {
+    var box = root.BITE_CDEC;
+    if (!box || !spot.cdec || !spot.cdec[key]) return null;
+    var id = spot.cdec[key];
+    var station = box.stations && box.stations[id];
+    if (!station || !station[key] || !station[key].length) return null;
+    return {
+      siteId: id,
+      siteName: station.name || id,
+      lat: null,
+      lon: null,
+      points: station[key]
+    };
+  }
+
+  function cdecStatus(spot) {
+    if (!spot.cdec) return 'n/a';
+    var box = root.BITE_CDEC;
+    if (!box || !box.stations) return 'down';
+    var age = Date.now() - (box.fetchedAt || 0);
+    return age > CDEC_STALE_MS ? 'stale' : 'live';
+  }
+
   function titleCase(s) {
     return String(s || '').toLowerCase().replace(/\b([a-z])/g, function (m) { return m.toUpperCase(); })
       .replace(/\bR\b/g, 'River').replace(/\bA\b/g, 'at').replace(/\bBl\b/g, 'below')
@@ -348,7 +380,8 @@
 
       // Water temperature falls back to a CO-OPS station only when nothing
       // better exists, since many stations do not carry the sensor.
-      var haveGaugeTemp = !!(usgs.data && usgs.data.params['00010']);
+      var haveGaugeTemp = !!(usgs.data && usgs.data.params['00010']) ||
+        !!(root.BITE_CDEC && spot.cdec && spot.cdec.temp);
       var haveSst = !!(marine.data && marine.data.hasSst);
       var needStation = !haveGaugeTemp && !haveSst && !!spot.tide;
       return (needStation ? loadStationTemp(spot.tide) : Promise.resolve({ data: null, status: 'n/a' }))
@@ -367,14 +400,23 @@
     var marineIndex = {};
     if (marine.data) marine.data.times.forEach(function (t, i) { marineIndex[t] = i; });
 
-    var tempSeries = pickParam(usgs.data, '00010');
-    var flowSeries = pickParam(usgs.data, '00060');
+    // CDEC first where the spot declares it: on the Feather the USGS fallback
+    // is a different river 25 miles downstream and reads well over ten degrees
+    // warm, which is enough to flip a salmon score on its own.
+    var cdecTemp = cdecSeries(spot, 'temp');
+    var cdecFlow = cdecSeries(spot, 'flow');
+    var tempSeries = cdecTemp || pickParam(usgs.data, '00010');
+    var flowSeries = cdecFlow || pickParam(usgs.data, '00060');
     var stageSeries = pickParam(usgs.data, '00065');
     var turbSeries = pickParam(usgs.data, '63680');
 
     // Where the water temperature comes from, best source first.
     var water = { source: null, label: null, siteName: null, distanceMi: null };
-    if (tempSeries) {
+    if (cdecTemp) {
+      water.source = 'cdec';
+      water.label = 'CDEC';
+      water.siteName = cdecTemp.siteName;
+    } else if (tempSeries) {
       water.source = 'gauge';
       water.label = 'Gauge';
       water.siteName = tempSeries.siteName;
@@ -395,7 +437,9 @@
     }
 
     var modeled = modelWaterF(weather, nowMs, spot.cls);
-    var lastGaugeF = tempSeries ? cToF(tempSeries.points[tempSeries.points.length - 1].v) : null;
+    var tempIsCelsius = !cdecTemp;   // USGS reports deg C, CDEC reports deg F
+    var toF = function (v) { return tempIsCelsius ? cToF(v) : v; };
+    var lastGaugeF = tempSeries ? toF(tempSeries.points[tempSeries.points.length - 1].v) : null;
     var lastGaugeT = tempSeries ? tempSeries.points[tempSeries.points.length - 1].t : null;
     var lastFlow = flowSeries ? flowSeries.points[flowSeries.points.length - 1].v : null;
     var lastFlowT = flowSeries ? flowSeries.points[flowSeries.points.length - 1].t : null;
@@ -443,9 +487,9 @@
       }
 
       // Water temperature per the resolved source.
-      if (water.source === 'gauge') {
+      if (water.source === 'gauge' || water.source === 'cdec') {
         var g = sampleAt(tempSeries.points, t, 90 * 60000);
-        if (g !== null) h.waterF = cToF(g);
+        if (g !== null) h.waterF = toF(g);
         else if (t > lastGaugeT && isNum(lastGaugeF)) {
           h.waterF = lastGaugeF; h.waterProjected = true;
         }
@@ -462,7 +506,7 @@
     // Forecast water temperature: hold the last reading, nudged by the damped
     // air-temperature trend. Rivers follow the air slowly, so 15% of the swing
     // over a day, capped at four degrees.
-    if ((water.source === 'gauge' || water.source === 'station') && weather) {
+    if ((water.source === 'gauge' || water.source === 'station' || water.source === 'cdec') && weather) {
       var airNow = meanOf(series.map(function (h) { return h.airF; }), nowIndex - 23, nowIndex);
       for (var k = nowIndex + 1; k < series.length; k++) {
         if (!series[k].waterProjected || !isNum(series[k].waterF)) continue;
@@ -515,7 +559,12 @@
         { key: 'weather', label: 'Weather', status: wx.status, at: wx.at, error: wx.error },
         { key: 'marine', label: 'Marine', status: marine.status, at: marine.at, error: marine.error },
         { key: 'river', label: 'River gauge', status: spot.gauges ? usgs.status : 'n/a', at: usgs.at, error: usgs.error },
-        { key: 'tide', label: 'Tide', status: spot.tide ? tide.status : 'n/a', at: tide.at, error: tide.error }
+        { key: 'tide', label: 'Tide', status: spot.tide ? tide.status : 'n/a', at: tide.at, error: tide.error },
+        {
+          key: 'cdec', label: 'CDEC', status: cdecStatus(spot),
+          at: (root.BITE_CDEC && root.BITE_CDEC.fetchedAt) || null,
+          error: cdecStatus(spot) === 'stale' ? 'readings have not refreshed in over 6 hours' : null
+        }
       ],
       stale: [wx, marine, usgs, tide].some(function (r) { return r.status === 'stale'; }),
       offline: wx.status === 'down'

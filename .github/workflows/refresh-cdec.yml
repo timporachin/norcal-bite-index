@@ -33,8 +33,11 @@ jobs:
         with:
           node-version: '20'
 
-      # Exits non-zero without writing if CDEC is down or the data looks wrong,
-      # so a bad fetch never overwrites a good file.
+      - name: Test sensor validation and fallback
+        run: node --test scripts/*.test.mjs
+
+      # Isolate unusable sensors; only refuse the whole refresh when no fresh
+      # valid series remain, preserving the last file during a total outage.
       - name: Fetch CDEC
         run: node scripts/fetch-cdec.mjs
 

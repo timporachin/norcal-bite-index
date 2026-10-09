@@ -24,9 +24,10 @@ It used to borrow readings from Sacramento @ Verona, 25 river miles downstream o
 
 So `.github/workflows/refresh-cdec.yml` runs `scripts/fetch-cdec.mjs` every hour, fetches CDEC where CORS does not apply, and commits `data/cdec.js`. The page loads that from its own origin. Gridley supplies temperature for the whole river; flow comes from the station nearest each stretch.
 
-Two things to know:
+Three things to know:
 
 - **GitHub disables scheduled workflows on a public repo after 60 days with no activity.** If the Feather data goes stale the app shows an amber CDEC light rather than pretending the reading is current — re-run the workflow from the Actions tab to wake it up.
+- **A bad sensor no longer blocks the other readings.** Each series is checked independently. Invalid, missing, or older-than-six-hour readings are withheld and flagged in the generated file; healthy flow and stage still refresh. The app checks observation timestamps, shows an amber CDEC light for partial availability, and labels a missing-temperature fallback **Modeled** with a visible explanation. If every series is unusable, the last file is left untouched and ages out normally.
 - **The Feather spots carry no USGS fallback gauge on purpose.** There is no USGS gauge on that river, and a flow number borrowed from the Sacramento or the Yuba is worse than none. If the refresher stops, flow drops out of the score and confidence falls, which is visible and honest.
 
 ## How the score works
@@ -60,6 +61,10 @@ It has no idea whether anyone is catching. There are no creel counts and no repo
 
 No build step, no dependencies, no bundler. Open `index.html` in a browser and it works, including straight from disk — reference data ships as JavaScript rather than JSON so `file://` does not trip over CORS. The only outside asset is the Google Fonts stylesheet, which falls back to system faces if it cannot load.
 
+### Tests
+
+Run `node --test scripts/*.test.mjs` with Node 20 or later. Tests cover isolated sensor failures, valid unit conversion, rejected readings, timestamp freshness, preserving the file during a total outage, and the browser data layer's measured/modeled fallback. No dependencies are required.
+
 ### On GitHub Pages
 
 **Settings → Pages → Deploy from a branch → `main` → `/(root)`.**
@@ -79,7 +84,7 @@ The site then serves at `https://<your-username>.github.io/norcal-bite-index/`. 
 | `js/fish-data.js` | Live data layer with timeouts, caching and last-good fallback |
 | `js/fish-ui.js` | Rendering and interaction |
 | `data/cdec.js` | Generated hourly by the workflow — CDEC readings for the Feather. Safe to delete; the app just loses the Feather's live numbers |
-| `scripts/fetch-cdec.mjs` | The refresher. Refuses to write if CDEC is down or the data looks wrong |
+| `scripts/fetch-cdec.mjs` | The refresher. Isolates bad sensors; refuses to write if no fresh valid series remain |
 
 ## Credits
 

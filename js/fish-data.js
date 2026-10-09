@@ -238,27 +238,70 @@
      behaves as it did before CDEC existed. */
   var CDEC_STALE_MS = 6 * 3600000;
 
-  function cdecSeries(spot, key) {
+  function cdecReading(spot, key) {
     var box = root.BITE_CDEC;
-    if (!box || !spot.cdec || !spot.cdec[key]) return null;
-    var id = spot.cdec[key];
-    var station = box.stations && box.stations[id];
-    if (!station || !station[key] || !station[key].length) return null;
+    var id = spot.cdec && spot.cdec[key];
+    var station = box && box.stations && box.stations[id];
+    var quality = station && station.quality && station.quality[key];
+    var points = station && station[key];
+    var result = { id: id, name: station && station.name || id, points: null,
+      status: 'down', at: null, error: 'no usable readings' };
+    if (quality && quality.status !== 'live') {
+      result.status = quality.status === 'stale' ? 'stale' : 'down';
+      result.at = quality.latestAt || null;
+      result.error = quality.error || quality.status;
+      return result;
+    }
+    if (!Array.isArray(points) || !points.length) return result;
+    // Also protect older generated files that predate per-sensor quality metadata.
+    function valid(p) {
+      return p && isNum(p.t) && isNum(p.v) &&
+        (key !== 'temp' || (p.v > 32 && p.v < 90)) && (key !== 'flow' || p.v >= 0);
+    }
+    var latest = points[points.length - 1];
+    if (!valid(latest) || latest.t >= Date.now() + 2 * HOUR) {
+      result.error = 'invalid latest reading';
+      return result;
+    }
+    result.at = latest.t;
+    if (Date.now() - latest.t >= CDEC_STALE_MS) {
+      result.status = 'stale';
+      result.error = 'latest valid reading is over 6 hours old';
+      return result;
+    }
+    result.points = points.filter(valid);
+    result.status = 'live';
+    result.error = null;
+    return result;
+  }
+
+  function cdecSeries(spot, key) {
+    if (!spot.cdec || !spot.cdec[key]) return null;
+    var reading = cdecReading(spot, key);
+    if (!reading.points) return null;
     return {
-      siteId: id,
-      siteName: station.name || id,
-      lat: null,
-      lon: null,
-      points: station[key]
+      siteId: reading.id, siteName: reading.name,
+      lat: null, lon: null, points: reading.points
     };
   }
 
-  function cdecStatus(spot) {
-    if (!spot.cdec) return 'n/a';
-    var box = root.BITE_CDEC;
-    if (!box || !box.stations) return 'down';
-    var age = Date.now() - (box.fetchedAt || 0);
-    return age > CDEC_STALE_MS ? 'stale' : 'live';
+  function cdecSource(spot) {
+    var source = { key: 'cdec', label: 'CDEC', status: 'n/a', at: null, error: null };
+    if (!spot.cdec) return source;
+    var keys = Object.keys(spot.cdec);
+    var readings = keys.map(function (key) { return cdecReading(spot, key); });
+    var live = readings.filter(function (r) { return r.status === 'live'; });
+    source.status = live.length === keys.length ? 'live' :
+      live.length || readings.some(function (r) { return r.status === 'stale'; }) ? 'stale' : 'down';
+    var observed = readings.map(function (r) { return r.at; }).filter(isNum);
+    source.at = observed.length ? Math.min.apply(null, observed) : null;
+    source.error = readings.map(function (r, i) {
+      return r.status === 'live' ? null : r.id + ' ' +
+        (keys[i] === 'temp' ? 'temperature' : keys[i]) + ': ' + r.error;
+    }).filter(Boolean).join('; ') || null;
+    if (spot.cdec.temp && !cdecSeries(spot, 'temp')) source.label += ' (temperature unavailable)';
+    else if (spot.cdec.flow && !cdecSeries(spot, 'flow')) source.label += ' (flow unavailable)';
+    return source;
   }
 
   function titleCase(s) {
@@ -381,7 +424,7 @@
       // Water temperature falls back to a CO-OPS station only when nothing
       // better exists, since many stations do not carry the sensor.
       var haveGaugeTemp = !!(usgs.data && usgs.data.params['00010']) ||
-        !!(root.BITE_CDEC && spot.cdec && spot.cdec.temp);
+        !!cdecSeries(spot, 'temp');
       var haveSst = !!(marine.data && marine.data.hasSst);
       var needStation = !haveGaugeTemp && !haveSst && !!spot.tide;
       return (needStation ? loadStationTemp(spot.tide) : Promise.resolve({ data: null, status: 'n/a' }))
@@ -437,6 +480,18 @@
     }
 
     var modeled = modelWaterF(weather, nowMs, spot.cls);
+    var cdec = cdecSource(spot);
+    var cdecWarning = null;
+    if (spot.cdec && spot.cdec.temp && !cdecTemp) {
+      var stationName = cdecReading(spot, 'temp').name;
+      cdecWarning = stationName + ' temperature unavailable; ' +
+        (water.source === 'modeled'
+          ? isNum(modeled) ? 'using an air-based estimate.' : 'no current temperature estimate.'
+          : 'using ' + water.label + '.');
+      if (water.source === 'modeled' && !isNum(modeled)) water.label = 'Unavailable';
+    } else if (spot.cdec && spot.cdec.flow && !cdecFlow) {
+      cdecWarning = cdecReading(spot, 'flow').name + ' flow unavailable; flow is omitted from the score.';
+    }
     var tempIsCelsius = !cdecTemp;   // USGS reports deg C, CDEC reports deg F
     var toF = function (v) { return tempIsCelsius ? cToF(v) : v; };
     var lastGaugeF = tempSeries ? toF(tempSeries.points[tempSeries.points.length - 1].v) : null;
@@ -549,6 +604,7 @@
       moon: moon,
       moonTimes: moonTimes,
       water: water,
+      cdecWarning: cdecWarning,
       gauge: tempSeries || flowSeries || null,
       // Raw ten-day gauge records, for the hydrograph and the river read.
       gaugeSeries: { temp: tempSeries, flow: flowSeries, stage: stageSeries, turbidity: turbSeries },
@@ -560,13 +616,10 @@
         { key: 'marine', label: 'Marine', status: marine.status, at: marine.at, error: marine.error },
         { key: 'river', label: 'River gauge', status: spot.gauges ? usgs.status : 'n/a', at: usgs.at, error: usgs.error },
         { key: 'tide', label: 'Tide', status: spot.tide ? tide.status : 'n/a', at: tide.at, error: tide.error },
-        {
-          key: 'cdec', label: 'CDEC', status: cdecStatus(spot),
-          at: (root.BITE_CDEC && root.BITE_CDEC.fetchedAt) || null,
-          error: cdecStatus(spot) === 'stale' ? 'readings have not refreshed in over 6 hours' : null
-        }
+        cdec
       ],
-      stale: [wx, marine, usgs, tide].some(function (r) { return r.status === 'stale'; }),
+      stale: cdec.status === 'stale' || (cdec.status === 'down' && !!spot.cdec) ||
+        [wx, marine, usgs, tide].some(function (r) { return r.status === 'stale'; }),
       offline: wx.status === 'down'
     };
   }

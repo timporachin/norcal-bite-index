@@ -7,8 +7,8 @@
    and commits the result so the page can load it from its own origin.
 
    Run: node scripts/fetch-cdec.mjs
-   Exits non-zero without writing if the fetch fails or the data looks wrong,
-   so a bad run never overwrites a good file.
+   Validates each sensor independently. Unusable series are omitted and flagged;
+   if no fresh valid series remain, exits non-zero without replacing the file.
 */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -18,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'cdec.js');
 const ZONE = 'America/Los_Angeles';
 const DAYS = 10;
+const MAX_AGE_MS = 6 * 3600000;
+const MAX_FUTURE_MS = 2 * 3600000;
 
 /* sensor number -> the key we store it under */
 const SENSORS = { 20: 'flow', 25: 'temp', 1: 'stage' };
@@ -47,11 +49,14 @@ function zoneOffsetMs(ms) {
   return asIfUtc - ms;          // + during DST-less UTC comparison; negative for Pacific
 }
 
-function pacificToEpoch(str) {
-  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})/.exec(String(str).trim());
+export function pacificToEpoch(str) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})$/.exec(String(str).trim());
   if (!m) return null;
   const [, y, mo, d, h, mi] = m.map(Number);
   const naive = Date.UTC(y, mo - 1, d, h, mi);
+  const check = new Date(naive);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 ||
+      check.getUTCDate() !== d || h > 23 || mi > 59) return null;
   // Two passes settle the DST boundary case.
   let guess = naive - zoneOffsetMs(naive);
   guess = naive - zoneOffsetMs(guess);
@@ -66,104 +71,129 @@ function ymd(ms) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 
-async function fetchSeries(station, sensor, startMs, endMs) {
-  const url = 'https://cdec.water.ca.gov/dynamicapp/req/JSONDataServlet' +
-    `?Stations=${station}&SensorNums=${sensor}&dur_code=E` +
-    `&Start=${ymd(startMs)}&End=${ymd(endMs)}`;
-
-  const res = await fetch(url, { headers: { 'user-agent': 'norcal-bite-index refresher' } });
-  if (!res.ok) throw new Error(`${station}/${sensor}: HTTP ${res.status}`);
-
-  const text = await res.text();
-  let rows;
-  try {
-    rows = JSON.parse(text);
-  } catch {
-    throw new Error(`${station}/${sensor}: response was not JSON`);
-  }
-  if (!Array.isArray(rows)) return [];
-
+/* Do not loosen the Gridley temperature bounds to accept a failing sensor.
+   CDEC has reported repeated 32 DEG F values during the October 2026 outage. */
+export function parseSeries(rows, sensor, now) {
+  if (!Array.isArray(rows)) throw new Error('response was not a JSON array');
   const points = [];
+  let rejected = 0;
+  let latestRejectedAt = null;
   for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
     const v = r.value;
-    if (typeof v !== 'number' || !isFinite(v) || v <= -9000) continue;
+    // CDEC missing-value sentinels are not observations.
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= -9000) continue;
     const t = pacificToEpoch(r.obsDate || r.date);
-    if (t === null) continue;
-    // Trust the reported unit rather than assuming Fahrenheit.
-    const units = String(r.units || '').toUpperCase();
-    const value = units.includes('DEG C') ? v * 9 / 5 + 32 : v;
-    points.push({ t, v: Math.round(value * 100) / 100 });
+    if (t === null) { rejected++; continue; }
+    const units = String(r.units || '').trim().toUpperCase();
+    const converted = sensor === 25 && units === 'DEG C' ? v * 9 / 5 + 32 : v;
+    const value = Math.round(converted * 100) / 100;
+    const valid = t < now + MAX_FUTURE_MS &&
+      (sensor !== 25 || ((units === 'DEG F' || units === 'DEG C') && value > 32 && value < 90)) &&
+      (sensor !== 20 || value >= 0);
+    if (!valid) {
+      rejected++;
+      latestRejectedAt = Math.max(latestRejectedAt ?? -Infinity, t);
+      continue;
+    }
+    points.push({ t, v: value });
   }
   points.sort((a, b) => a.t - b.t);
+  const newest = points[points.length - 1];
+  const quality = { status: 'live', latestAt: newest?.t ?? null, rejected };
+  if (!newest || (latestRejectedAt !== null && latestRejectedAt >= newest.t)) {
+    quality.status = rejected ? 'invalid' : 'missing';
+    quality.error = rejected ? 'invalid readings; sensor withheld' : 'no usable readings';
+    return { points: [], quality };
+  }
+  if (now - newest.t >= MAX_AGE_MS) {
+    quality.status = 'stale';
+    quality.error = 'latest valid reading is over 6 hours old';
+    return { points: [], quality };
+  }
 
-  // Thin to hourly; CDEC records every 15 minutes and the charts read hourly.
+  // Thin to hourly, but retain the actual newest observation for freshness.
   const thinned = [];
   let last = -Infinity;
   for (const p of points) {
     if (p.t - last >= 3540000) { thinned.push(p); last = p.t; }
   }
-  return thinned;
+  if (thinned[thinned.length - 1] !== newest) thinned.push(newest);
+  return { points: thinned, quality };
+}
+
+async function fetchSeries(station, sensor, startMs, now, fetchImpl) {
+  const url = 'https://cdec.water.ca.gov/dynamicapp/req/JSONDataServlet' +
+    `?Stations=${station}&SensorNums=${sensor}&dur_code=E` +
+    `&Start=${ymd(startMs)}&End=${ymd(now + 86400000)}`;
+  const res = await fetchImpl(url, {
+    headers: { 'user-agent': 'norcal-bite-index refresher' },
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let rows;
+  try { rows = JSON.parse(await res.text()); }
+  catch { throw new Error('response was not JSON'); }
+  return parseSeries(rows, sensor, now);
 }
 
 /* ---------------------------------------------------------------- main --- */
 
-const now = Date.now();
-const start = now - DAYS * 86400000;
-const stations = {};
-const problems = [];
+export async function buildPayload({ now = Date.now(), fetchImpl = fetch } = {}) {
+  const stations = {};
+  let usableSeries = 0;
+  for (const st of STATIONS) {
+    const entry = { name: st.name, quality: {} };
+    for (const sensor of st.want) {
+      const key = SENSORS[sensor];
+      try {
+        const result = await fetchSeries(st.id, sensor, now - DAYS * 86400000, now, fetchImpl);
+        entry.quality[key] = result.quality;
+        if (result.points.length) {
+          entry[key] = result.points;
+          usableSeries++;
+        }
+      } catch (err) {
+        entry.quality[key] = { status: 'down', latestAt: null, error: String(err.message || err) };
+      }
+    }
+    stations[st.id] = entry;
+  }
+  if (!usableSeries) {
+    const failures = Object.entries(stations).flatMap(([id, station]) =>
+      Object.entries(station.quality).map(([key, q]) => `${id}/${key}: ${q.error}`));
+    throw new Error('no fresh valid CDEC series; refusing to write. ' + failures.join('; '));
+  }
+  return { fetchedAt: now, source: 'CDEC', stations };
+}
 
-for (const st of STATIONS) {
-  const entry = { name: st.name };
-  for (const sensor of st.want) {
-    const key = SENSORS[sensor];
-    try {
-      const series = await fetchSeries(st.id, sensor, start, now + 86400000);
-      if (series.length) entry[key] = series;
-    } catch (err) {
-      problems.push(String(err.message || err));
+export async function refresh({ out = OUT, now, fetchImpl } = {}) {
+  // Build and validate before touching the existing file. An outage preserves it.
+  const payload = await buildPayload({ now, fetchImpl });
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out,
+    '/* Generated by scripts/fetch-cdec.mjs — do not edit by hand.\n' +
+    '   California Data Exchange Center readings, refreshed on a schedule because\n' +
+    '   CDEC cannot be called directly from the browser. Timestamps are epoch ms. */\n' +
+    'window.BITE_CDEC = ' + JSON.stringify(payload) + ';\n');
+
+  console.log(`Wrote ${out}`);
+  for (const [id, station] of Object.entries(payload.stations)) {
+    for (const [key, quality] of Object.entries(station.quality)) {
+      const points = station[key];
+      if (points) {
+        console.log(`  ${id}/${key}: ${points[points.length - 1].v} (${points.length} pts; ${quality.rejected} rejected)`);
+      } else {
+        console.warn(`  WARNING ${id}/${key}: ${quality.status} — ${quality.error}`);
+      }
     }
   }
-  if (entry.flow || entry.temp || entry.stage) stations[st.id] = entry;
-  else problems.push(`${st.id}: no usable series`);
+  return payload;
 }
 
-/* Sanity gates — never write a file that would quietly mislead the app. */
-const grl = stations.GRL;
-if (!grl || !grl.temp || !grl.temp.length) {
-  console.error('FAILED: no Gridley water temperature; refusing to write.');
-  problems.forEach((p) => console.error('  ' + p));
-  process.exit(1);
-}
-
-const newest = grl.temp[grl.temp.length - 1];
-const ageHours = (now - newest.t) / 3600000;
-if (!(ageHours > -2 && ageHours < 12)) {
-  console.error(`FAILED: newest Gridley reading is ${ageHours.toFixed(1)}h old — timestamps look wrong; refusing to write.`);
-  process.exit(1);
-}
-if (!(newest.v > 32 && newest.v < 90)) {
-  console.error(`FAILED: Gridley water temperature ${newest.v} is out of plausible range; refusing to write.`);
-  process.exit(1);
-}
-
-const payload = { fetchedAt: now, source: 'CDEC', stations };
-mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT,
-  '/* Generated by scripts/fetch-cdec.mjs — do not edit by hand.\n' +
-  '   California Data Exchange Center readings, refreshed on a schedule because\n' +
-  '   CDEC cannot be called directly from the browser. Timestamps are epoch ms. */\n' +
-  'window.BITE_CDEC = ' + JSON.stringify(payload) + ';\n');
-
-const kb = (Buffer.byteLength(JSON.stringify(payload)) / 1024).toFixed(0);
-console.log(`Wrote ${OUT} (${kb} KB)`);
-for (const [id, s] of Object.entries(stations)) {
-  const bits = ['temp', 'flow', 'stage']
-    .filter((k) => s[k])
-    .map((k) => `${k}=${s[k][s[k].length - 1].v} (${s[k].length} pts)`);
-  console.log(`  ${id}  ${s.name}: ${bits.join('  ')}`);
-}
-console.log(`  newest Gridley reading ${ageHours.toFixed(1)}h old`);
-if (problems.length) {
-  console.log('Non-fatal problems:');
-  problems.forEach((p) => console.log('  ' + p));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  refresh().catch((err) => {
+    console.error(`FAILED: ${err.message || err}`);
+    process.exitCode = 1;
+  });
 }

@@ -1,0 +1,23 @@
+name: Test CDEC data handling
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check JavaScript syntax
+        run: |
+          for file in js/*.js scripts/*.mjs; do node --check "$file"; done
+      - name: Run regression tests
+        run: node --test scripts/*.test.mjs

@@ -1238,7 +1238,7 @@
     $('runCard').hidden = !isRiver;
     if (isRiver) {
       $('runHeading').textContent = 'Run & river';
-      $('runNote').textContent = state.spot.gaugeNote || (env.gauge ? env.gauge.siteName : '');
+      $('runNote').textContent = env.cdecWarning || state.spot.gaugeNote || (env.gauge ? env.gauge.siteName : '');
       drawRunCurve();
       drawHydrograph();
     }

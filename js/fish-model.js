@@ -46,7 +46,7 @@
   var PROFILES = {
     riverRun: {
       label: 'River run',
-      weights: { run: 18, flow: 18, temp: 14, clarity: 8, tide: 8, light: 7, pressure: 5, solunar: 4, sky: 3 }
+      weights: { run: 28, flow: 24, temp: 18, clarity: 10, tide: 8, light: 5, pressure: 4, solunar: 3, sky: 2 }
     },
     ocean: {
       label: 'Open coast',
@@ -466,7 +466,7 @@
       // amount of perfect water makes up for an empty river. Weighted averaging
       // alone cannot express that, so it is applied as a multiplier.
       if ((profileKey === 'riverRun' || profileKey === 'ocean') && isNum(runV) && runV < 0.35) {
-        mult *= ramp([[0, 0.22], [0.15, 0.38], [0.25, 0.60], [0.35, 1]], runV);
+        mult *= ramp([[0, 0.18], [0.15, 0.30], [0.25, 0.52], [0.35, 1]], runV);
         if (runV < 0.2) {
           gates.push({
             key: 'offseason',

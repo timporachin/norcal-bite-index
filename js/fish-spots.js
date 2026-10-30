@@ -308,7 +308,7 @@
       lat: 38.0560, lon: -122.0395, cls: 'bay', system: 'bay',
       tide: '9415144',
       species: ['chinook-fall', 'sturgeon-white', 'striper'],
-      blurb: 'Winter sturgeon water and easy salmon runs when the fall kings move through the bay.'
+      blurb: 'The strongest salmon bay in the Delta complex when fall kings push through the estuary on a clean incoming tide.'
     },
     {
       id: 'carquinez-benicia', name: 'Carquinez Strait — Benicia', region: 'San Francisco Bay',

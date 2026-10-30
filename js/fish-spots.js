@@ -1,27 +1,27 @@
 /* Bite Index — Northern California spot registry.
 
-   "Closest area" resolves to the nearest entry here. Each spot names the real
-   live sensors that cover it: a USGS gauge for river temperature, flow and
-   turbidity, and a NOAA CO-OPS station for tide. Both were checked against the
-   live services — every id below returns data today.
+    "Closest area" resolves to the nearest entry here. Each spot names the real
+    live sensors that cover it: a USGS gauge for river temperature, flow and
+    turbidity, and a NOAA CO-OPS station for tide. Both were checked against the
+    live services — every id below returns data today.
 
-   cls (water class) drives which scoring profile the model uses:
-     river        free-flowing, no tidal influence
-     tidal-river  river reach that still breathes with the tide
-     delta        the Sacramento-San Joaquin Delta
-     bay          coastal bays and inlets
-     ocean        open coast
-     surf         beach fishing
-     lake         reservoirs and natural lakes
+    cls (water class) drives which scoring profile the model uses:
+      river        free-flowing, no tidal influence
+      tidal-river  river reach that still breathes with the tide
+      delta        the Sacramento-San Joaquin Delta
+      bay          coastal bays and inlets
+      ocean        open coast
+      surf         beach fishing
+      lake         reservoirs and natural lakes
 
-   A spot may also carry `cdec`, naming the California Data Exchange Center
-   stations that supply its temperature and flow. CDEC serves no CORS headers,
-   so those readings are refreshed into data/cdec.js by a scheduled job rather
-   than fetched from the browser. The Feather spots carry no `gauges` at all:
-   there is no USGS gauge on that river, and borrowing one from the Sacramento
-   or the Yuba is worse than reporting nothing — so if the refresher stops, the
-   flow factor drops out and confidence falls, which is visible and honest.
-*/
+    A spot may also carry `cdec`, naming the California Data Exchange Center
+    stations that supply its temperature and flow. CDEC serves no CORS headers,
+    so those readings are refreshed into data/cdec.js by a scheduled job rather
+    than fetched from the browser. The Feather spots carry no `gauges` at all:
+    there is no USGS gauge on that river, and borrowing one from the Sacramento
+    or the Yuba is worse than reporting nothing — so if the refresher stops, the
+    flow factor drops out and confidence falls, which is visible and honest.
+ */
 (function (root) {
   'use strict';
 
@@ -307,8 +307,8 @@
       id: 'suisun-bay', name: 'Suisun Bay — Port Chicago', region: 'San Francisco Bay',
       lat: 38.0560, lon: -122.0395, cls: 'bay', system: 'bay',
       tide: '9415144',
-      species: ['sturgeon-white', 'striper'],
-      blurb: 'Winter sturgeon water. Storm runoff and a big outgoing put them on the feed.'
+      species: ['chinook-fall', 'sturgeon-white', 'striper'],
+      blurb: 'Winter sturgeon water and easy salmon runs when the fall kings move through the bay.'
     },
     {
       id: 'carquinez-benicia', name: 'Carquinez Strait — Benicia', region: 'San Francisco Bay',

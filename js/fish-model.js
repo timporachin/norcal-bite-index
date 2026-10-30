@@ -15,7 +15,7 @@
    dropped and the remaining weights renormalised, which is also how confidence
    is computed — a dead sensor lowers confidence instead of quietly skewing the
    result.
-*/
+ */
 (function (root) {
   'use strict';
 
@@ -46,23 +46,23 @@
   var PROFILES = {
     riverRun: {
       label: 'River run',
-      weights: { run: 22, flow: 20, temp: 16, clarity: 10, tide: 10, light: 8, pressure: 6, solunar: 5, sky: 3 }
+      weights: { run: 18, flow: 18, temp: 14, clarity: 8, tide: 8, light: 7, pressure: 5, solunar: 4, sky: 3 }
     },
     ocean: {
       label: 'Open coast',
-      weights: { temp: 20, swell: 18, upwelling: 12, tide: 12, light: 12, run: 12, pressure: 8, solunar: 6 }
+      weights: { temp: 18, swell: 16, upwelling: 11, tide: 10, light: 10, run: 10, pressure: 7, solunar: 5 }
     },
     bay: {
       label: 'Bay & Delta',
-      weights: { tide: 24, temp: 16, light: 14, run: 12, pressure: 12, solunar: 10, wind: 6, sky: 6 }
+      weights: { tide: 20, temp: 14, light: 12, run: 10, pressure: 10, solunar: 8, wind: 5, sky: 5 }
     },
     surf: {
       label: 'Surf',
-      weights: { tide: 30, swell: 20, light: 12, run: 10, temp: 10, wind: 10, pressure: 8 }
+      weights: { tide: 26, swell: 18, light: 11, run: 8, temp: 9, wind: 9, pressure: 7 }
     },
     lake: {
       label: 'Lake',
-      weights: { temp: 22, pressure: 18, solunar: 14, light: 14, run: 10, wind: 10, sky: 8, front: 4 }
+      weights: { temp: 20, pressure: 16, solunar: 12, light: 12, run: 8, wind: 9, sky: 7, front: 3 }
     }
   };
 
@@ -444,7 +444,7 @@
           confW += f.weight * (f.estimated ? 0.5 : 1);
         }
       });
-      var base = sumW > 0 ? sumWV / sumW : 0.4;
+      var base = sumW > 0 ? sumWV / sumW : 0.35;
 
       // Gates
       var gates = [];
@@ -466,7 +466,7 @@
       // amount of perfect water makes up for an empty river. Weighted averaging
       // alone cannot express that, so it is applied as a multiplier.
       if ((profileKey === 'riverRun' || profileKey === 'ocean') && isNum(runV) && runV < 0.35) {
-        mult *= ramp([[0, 0.28], [0.15, 0.45], [0.25, 0.68], [0.35, 1]], runV);
+        mult *= ramp([[0, 0.22], [0.15, 0.38], [0.25, 0.60], [0.35, 1]], runV);
         if (runV < 0.2) {
           gates.push({
             key: 'offseason',
